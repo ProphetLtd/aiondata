@@ -52,3 +52,27 @@ def test_search_pdb(pdb_handler):
             ComparisonType=ComparisonType,
         )
         mock_perform_search_with_graph.assert_called()
+
+
+def test_fetch_PDB_uniprot_accession(pdb_handler):
+    """Test that Uniprot accession are fetched using a PDB ID"""
+    pdbid = "IAAT"
+    with patch(
+        "aiondata.protein_structure.fetch_PDB_uniprot_accession"
+    ) as mock_PDB:
+        pdb_handler.fetch_PDB_uniprot_accession(
+            pdbid=pdbid
+        )
+        mock_PDB.assert_called()
+
+
+def test_fetch_uniprot_sequence(pdb_handler):
+    """Test that a Sequence are fetched using a Uniprot accession"""
+    uniprot = "P00504"
+    with patch(
+        "aiondata.protein_structure.fetch_uniprot_sequence"
+    ) as mock_uniprot:
+        pdb_handler.fetch_uniprot_sequence(
+            uniprot=uniprot
+        )
+        mock_uniprot.assert_called()
