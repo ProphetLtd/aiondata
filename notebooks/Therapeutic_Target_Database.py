@@ -1,11 +1,6 @@
 import requests
 import pandas as pd
 
-# print current working directory
-import os
-
-print(os.getcwd())
-
 
 def getfile(url):
     response = requests.get(url)
