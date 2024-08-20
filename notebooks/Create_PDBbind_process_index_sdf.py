@@ -4,6 +4,9 @@ import tarfile
 import io
 import os
 from rdkit import Chem
+from aiondata.raw import protein_structure
+from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def download_extract(link, path):
@@ -87,15 +90,15 @@ def read_and_clean_df(file_path):
     return df
 
 
-def merge_and_clean(ps_df):
+def merge_and_clean(ps_df, df):
     # Merge DataFrames based on 'ligand name'
     merged_df = df.merge(ps_df, how="left", left_on="PDB code", right_on="PDB")
 
-    # Display the merged DataFrame
-    merged_df
-
     # count the number of missing values in the column "SMILES"
-    print(merged_df["Isomeric SMILES"].isnull().sum())
+    print(
+        "Number of missing values in the column 'Isomeric SMILES': ",
+        merged_df["Isomeric SMILES"].isnull().sum(),
+    )
 
     # remove the rows with missing values in the column "SMILES"
     merged_df = merged_df.dropna(subset=["Isomeric SMILES"])
@@ -105,9 +108,52 @@ def merge_and_clean(ps_df):
     return merged_df
 
 
-if __name__ == "__main__":
+def fetch_sequence_for_pdb(pdb_code, pdbh):
+    try:
+        uni = pdbh.fetch_PDB_uniprot_accession(pdb_code)[0]
+        if uni:
+            seq = pdbh.fetch_uniprot_sequence(uni)
+            return seq if seq else None
+        else:
+            return None
+    except Exception as e:
+        print(f"Error processing PDB ID {pdb_code}: {e}")
+        return None
 
-    local_path = "local data/PDBbind/"
+
+def add_pdb_based_sequence(df, pdb_column_name):
+    pdbh = protein_structure.PDBHandler()
+    sequences = []
+
+    # Use ThreadPoolExecutor for parallelization
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all tasks to the executor
+        futures = {
+            executor.submit(
+                fetch_sequence_for_pdb, df[pdb_column_name].iloc[i], pdbh
+            ): i
+            for i in range(len(df))
+        }
+
+        # Use tqdm to track progress
+        for future in tqdm(
+            as_completed(futures), total=len(df), desc="Fetching Sequences"
+        ):
+            idx = futures[future]
+            try:
+                sequences.append(future.result())
+            except Exception as e:
+                print(f"Error at index {idx}: {e}")
+                sequences.append(None)
+    df["sequence"] = sequences
+    return df
+
+
+if __name__ == "__main__":
+    # print current working directory
+    print(os.getcwd())
+
+    local_path = "../local data/PDBbind/"
 
     # Create folder called PDBbind in the local data folder
 
@@ -138,14 +184,22 @@ if __name__ == "__main__":
     file_path = local_path + "index/INDEX_general_PL_data.2020"
     df = read_and_clean_df(file_path)
 
-    # Usage
+    ### Process the sdf files to a CSV file ###
+    print("Processing sdf files")
     folder_path = "sdf"
     output_csv_path = local_path + "processed_smiles.csv"
-    process_folder_to_csv(local_path + folder_path, output_csv_path)
+    # process_folder_to_csv(local_path + folder_path, output_csv_path)
 
     # Read the processed SMILES CSV file
     ps_df = pd.read_csv(output_csv_path)
 
-    merged_df = merge_and_clean(ps_df)
+    # Merge the DataFrames
+    merged_df = merge_and_clean(ps_df, df)
+
+    # add sequence to the dataframe
+    merged_df = add_pdb_based_sequence(merged_df, "PDB code")
+
     # save the merged DataFrame to a CSV file
     merged_df.to_csv(local_path + "PDBbind_SmilesAddition.csv", index=False)
+
+    print("PDBbind edited has been saved to a CSV file.")
