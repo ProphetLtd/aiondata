@@ -10,7 +10,10 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from aiondata.raw import protein_structure
+from rdkit.Chem import AllChem
+from rdkit import RDLogger
 
+RDLogger.DisableLog("rdApp.warning")
 pdbh = protein_structure.PDBHandler()
 
 
@@ -57,28 +60,64 @@ def get_sequence_with_resseq(pdb_file):
     return sequence, resseq_list
 
 
+# def extract_smiles_from_sdf_gz(file_path):
+#     smiles_list = []
+#     try:
+#         with gzip.open(file_path, "rb") as gz_file:
+#             suppl = Chem.ForwardSDMolSupplier(gz_file,removeHs=True)
+#             for mol in suppl:
+#                 if mol is not None:
+#                     smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
+#                     smiles_list.append(smiles)
+#     except Exception as e:
+#         print(f"Error extracting SMILES from {file_path}: {e}")
+#     return smiles_list
+
+
+# def extract_smiles_from_ism(file_path):
+#     smiles_list = []
+#     try:
+#         with open(file_path, "r") as file:
+#             for line in file.readlines():
+#                 smiles_list.append(line.split()[0])
+#     except Exception as e:
+#         print(f"Error extracting SMILES from {file_path}: {e}")
+#     return smiles_list
+
+
+##new version
 def extract_smiles_from_sdf_gz(file_path):
+    """Extracts SMILES from a .sdf.gz file."""
     smiles_list = []
-    try:
-        with gzip.open(file_path, "rb") as gz_file:
-            suppl = Chem.ForwardSDMolSupplier(gz_file)
-            for mol in suppl:
-                if mol is not None:
-                    smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
-                    smiles_list.append(smiles)
-    except Exception as e:
-        print(f"Error extracting SMILES from {file_path}: {e}")
+    with gzip.open(file_path, "rb") as gz_file:
+        suppl = Chem.ForwardSDMolSupplier(gz_file, removeHs=True)
+        for mol in suppl:
+            if mol is not None:  # Check if the molecule is valid
+                if not mol.GetNumConformers():  # Check if it lacks 3D coordinates
+                    AllChem.EmbedMolecule(mol)  # Embed 3D coordinates if needed
+                smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
+                smiles_list.append(smiles)
+                smiles_list = list(set(smiles_list))
     return smiles_list
 
 
 def extract_smiles_from_ism(file_path):
+    """Extracts SMILES from a .ism file."""
     smiles_list = []
-    try:
-        with open(file_path, "r") as file:
-            for line in file.readlines():
-                smiles_list.append(line.split()[0])
-    except Exception as e:
-        print(f"Error extracting SMILES from {file_path}: {e}")
+
+    with open(file_path, "r") as file:
+        for line in file.readlines():
+            smiles = line.split()[0]
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is not None:  # Check if the molecule is valid
+                mol = Chem.RemoveHs(mol)  # Remove hydrogen atoms
+                if not mol.GetNumConformers():  # Check if it lacks 3D coordinates
+                    AllChem.EmbedMolecule(mol)  # Embed 3D coordinates if needed
+                smiles = Chem.MolToSmiles(
+                    mol, isomericSmiles=True
+                )  # Regenerate SMILES after embedding
+                smiles_list.append(smiles)
+                smiles_list = list(set(smiles_list))
     return smiles_list
 
 
@@ -127,7 +166,8 @@ def get_pdb_from_table(target_name):
 
 
 # Path to the DUDE dataset directory
-DUDE_dir = "local data/DUDE/"
+DUDE_base = "local data/DUDE/"
+DUDE_dir = DUDE_base + "DUDE samples/"
 
 # Get the table from the URL
 url = "http://dude.docking.org/targets"
@@ -186,7 +226,7 @@ for sample in tqdm(folders, desc="Processing Samples"):
 
 # Write info to a json file
 try:
-    with open(DUDE_dir + "info.json", "w") as f:
+    with open(DUDE_base + "DUDE_processed.json", "w") as f:
         json.dump(info, f, indent=4)
 except Exception as e:
     print(f"Error writing to info.json: {e}")
