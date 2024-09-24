@@ -199,7 +199,7 @@ for sample in tqdm(unique_proteins, desc="Processing samples", unit="sample"):
         info[sample]["PDB_seq"] = None
 
 # Save the info dictionary to a file
-info_file = DUDE_AD_base + "AD_dataset_info.json"
+info_file = DUDE_AD_base + "DUD-AD_proccessed.json"
 with open(info_file, "w") as f:
     json.dump(info, f)
 print(f"Info saved to {info_file}")
