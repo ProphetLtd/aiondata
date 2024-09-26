@@ -171,8 +171,6 @@ cython_debug/
 #semgrep
 semgrep.out
 
-#data
-data/
 
 #test notebooks
 notebooks/test.ipynb
