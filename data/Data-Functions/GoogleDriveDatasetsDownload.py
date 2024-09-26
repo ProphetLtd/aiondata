@@ -29,7 +29,7 @@ def authenticate_drive(TOKEN_PATH, CREDENTIALS_PATH, SCOPES):
 
 
 def list_files_in_folder(service, folder_id):
-    query = f"'{folder_id}' in parents"
+    query = f"'{folder_id}' in parents and trashed = false"
     results = (
         service.files()
         .list(
@@ -82,20 +82,21 @@ if __name__ == "__main__":
     CREDENTIALS_PATH = (
         "auth/ProPhet_DownloadDrive_oAuth.json"  # Path to your web-style credentials
     )
-    TOKEN_PATH = "auth/token.json"
+    TOKEN_PATH = "../auth/token.json"
 
-    print("Authenticating...")
+    print("Authenticating...\n")
 
     # Authenticate and create the service
     creds = authenticate_drive(TOKEN_PATH, CREDENTIALS_PATH, SCOPES)
     service = build("drive", "v3", credentials=creds)  # Create the Drive API service
 
-    print("Authenticated successfully.")
+    print("Authenticated successfully.\n")
 
     # List and download the files in the Datasets folder
     folder_id = "1xFUzEv39GgPfjVlXYTD12rNyS81Kreks"  # Datasets folder
     files = list_files_in_folder(service, folder_id)
-    dataset_dir = "local data/Datasets/"
+    print(f"\n Current files in the folder:\n {files}\n\n")
+    dataset_dir = "../local data/Datasets/"
 
     # download the files if they dont exist
     for file in files:
