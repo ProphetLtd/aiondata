@@ -226,16 +226,15 @@ class PDBHandler(CachedDataset):
 
         return results
 
-    def fetch_PDB_uniprot_accession(self, pdb_id):
+    def fetch_PDB_uniprot_accession(pdb_id):
         """
-        Fetches the UniProt accession number for a given PDB ID.
-        Problem, this PDB ID does not use chain information. If you need to use chain information, do not remove the chain and run, this may give you the wrong UniProt accession.
+        Fetches the UniProt accession numbers for all chains in a given PDB ID.
 
         Parameters:
             pdb_id (str): The PDB ID of the protein.
 
         Returns:
-            str: The UniProt accession number if available, otherwise None.
+            dict: A dictionary with the chain ID as the key and the UniProt accession numbers as the values.
         """
         url = "https://data.rcsb.org/graphql"
 
@@ -263,18 +262,32 @@ class PDBHandler(CachedDataset):
             response.raise_for_status()  # Raises an HTTPError for bad responses (4xx or 5xx)
             data = response.json()
 
-            # Extracting the UniProt accession number
-            try:
-                db_accession = data["data"]["entries"][0]["polymer_entities"][0][
-                    "rcsb_polymer_entity_container_identifiers"
-                ]["reference_sequence_identifiers"][0]["database_accession"]
-                db_name = data["data"]["entries"][0]["polymer_entities"][0][
-                    "rcsb_polymer_entity_container_identifiers"
-                ]["reference_sequence_identifiers"][0]["database_name"]
-                return db_accession, db_name
-            except (KeyError, IndexError) as e:
-                print(f"Error extracting data: {e}")
-                return None
+            # Extracting the UniProt accession numbers for each chain
+            chains_uniprot = {}
+            for entity in data["data"]["entries"][0]["polymer_entities"]:
+                chain_id = entity["rcsb_id"]  # Get the chain ID
+                accessions = entity["rcsb_polymer_entity_container_identifiers"].get(
+                    "reference_sequence_identifiers"
+                )
+
+                if accessions:  # Check if accessions is not None
+                    # Collect all UniProt accession numbers for the chain
+                    uniprot_accessions = [
+                        acc["database_accession"]
+                        for acc in accessions
+                        if acc["database_name"] == "UniProt"
+                    ]
+                    chains_uniprot[chain_id] = (
+                        uniprot_accessions if uniprot_accessions else None
+                    )
+                else:
+                    chains_uniprot[chain_id] = None
+
+            return chains_uniprot
+
+        except requests.RequestException as e:
+            print(f"Request failed: {e}")
+            return None
 
         except requests.RequestException as e:
             print(f"Request failed: {e}")

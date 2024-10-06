@@ -39,7 +39,7 @@ def test_search_pdb(pdb_handler):
     Uniprot_accession = "P04637"
     fromdb = "UniProt"
     nonpolymer = 1
-    experiment= "SOLUTION NMR"
+    experiment = "SOLUTION NMR"
     ComparisonType = "Less"
     with patch(
         "aiondata.raw.protein_structure.perform_search_with_graph"
@@ -56,14 +56,61 @@ def test_search_pdb(pdb_handler):
         mock_perform_search_with_graph.assert_called()
 
 
-def test_fetch_PDB_uniprot_accession(pdb_handler):
-    """Test that Uniprot accession are fetched using a PDB ID"""
-    pdbid = "IAAT"
-    with patch(
-        "aiondata.raw.protein_structure.PDBHandler.fetch_PDB_uniprot_accession"
-    ) as mock_PDB:
-        pdb_handler.fetch_PDB_uniprot_accession(pdbid)
-        mock_PDB.assert_called()
+def test_fetch_PDB_uniprot_accession():
+    """Test that UniProt accessions are fetched correctly using a PDB ID"""
+    pdbid = "3sn6"
+
+    # Sample mock response to simulate the data returned from the API
+    mock_response = {
+        "data": {
+            "entries": [
+                {
+                    "polymer_entities": [
+                        {
+                            "rcsb_id": "3SN6_1",
+                            "rcsb_polymer_entity_container_identifiers": {
+                                "reference_sequence_identifiers": [
+                                    {
+                                        "database_accession": "P04896",
+                                        "database_name": "UniProt",
+                                    }
+                                ]
+                            },
+                        },
+                        {
+                            "rcsb_id": "3SN6_2",
+                            "rcsb_polymer_entity_container_identifiers": {
+                                "reference_sequence_identifiers": [
+                                    {
+                                        "database_accession": "P54311",
+                                        "database_name": "UniProt",
+                                    }
+                                ]
+                            },
+                        },
+                    ]
+                }
+            ]
+        }
+    }
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.json.return_value = mock_response
+        mock_post.return_value.raise_for_status = (
+            lambda: None
+        )  # To bypass raise_for_status
+
+        # Call the function under test
+        result = pdb_handler.fetch_PDB_uniprot_accession(pdbid)
+
+        # Assert that the requests.post was called with the correct URL
+        mock_post.assert_called_with(
+            "https://data.rcsb.org/graphql", json={"query": ANY}
+        )
+
+        # Verify the result is as expected
+        expected_result = {"3SN6_1": ["P04896"], "3SN6_2": ["P54311"]}
+        assert result == expected_result
 
 
 def test_fetch_uniprot_sequence(pdb_handler):
