@@ -1,4 +1,5 @@
 # read all folder or file names in a directory
+import sys
 import os
 from Bio.Data import IUPACData
 from rdkit import Chem
@@ -6,8 +7,19 @@ import tempfile
 from rdkit import Chem
 from rdkit import RDLogger
 from aiondata.raw import protein_structure
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+from Bio import Entrez, SeqIO
+import concurrent.futures
+from tqdm import tqdm
 
 pdbh = protein_structure.PDBHandler()
+
+
+# Suppress RDKit warnings
+RDLogger.DisableLog("rdApp.*")
+RDLogger.DisableLog("rdApp.warning")
 
 
 def get_files_in_dir(directory):
@@ -157,10 +169,6 @@ def extract_smiles_from_mol2(file_path):
 #     print("Failed to extract SMILES.")
 
 
-# Suppress RDKit warnings
-RDLogger.DisableLog("rdApp.*")
-
-
 def fix_cationic_carbons(mol):
     """Fixes cationic carbons by resetting their formal charge."""
     for atom in mol.GetAtoms():
@@ -241,12 +249,161 @@ def extract_smiles_from_mol2(file_path):
 # also take only the first column
 
 
-def get_inactive_file(file_path):
+def get_smiles_file(file_path):
     """Reads a text file and returns a list of lines."""
     with open(file_path, "r") as file:
         lines = file.readlines()
     return [line.split()[0] for line in lines]
 
+
+def process_smiles(smiles):
+    """
+    Processes a single SMILES string, embedding if necessary and converting to canonical SMILES.
+
+    Args:
+        smiles (str): The SMILES string to process.
+
+    Returns:
+        str: A canonical SMILES string or None if invalid.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    if mol:
+        smiles = Chem.MolToSmiles(Chem.RemoveHs(mol), isomericSmiles=True)
+    return smiles
+
+
+def extract_smiles_from_ism(file_path):
+    """
+    Extracts and processes SMILES strings from an .ism file,
+    removing duplicates and ensuring valid molecular structures, using parallel processing.
+
+    Args:
+        file_path (str): The path to the .ism file.
+
+    Returns:
+        list: A list of unique and valid SMILES strings.
+    """
+
+    with open(file_path, "r") as file:
+        smiles_list = [line.split()[0] for line in file]
+
+    smiles_set = set()
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        results = []
+        for result in tqdm(
+            executor.map(process_smiles, smiles_list),
+            total=len(smiles_list),
+            desc="Processing SMILES",
+        ):
+            results.append(result)
+            sys.stdout.flush()  # Force output flush
+
+    for smiles in results:
+        if smiles:
+            smiles_set.add(smiles)
+
+    return list(smiles_set)
+
+
+# # Example usage (Make sure to replace with your actual path)
+# ism_path = "../../local data/LIT-PCBA/PDBs/ADRB2/inactives.smi"
+# inactives = extract_smiles_from_ism(ism_path)
+# print(inactives)
+
+
+def extract_table_to_pandas(url, header=True):
+    """
+    Extracts the table from the given URL and returns a Pandas DataFrame.
+
+    Args:
+      url: The URL of the webpage containing the table.
+      header: A boolean value indicating whether the table has a header row.
+        Defaults to True. If False, no header will be used.
+
+    Returns:
+      A Pandas DataFrame containing the table data.
+    """
+
+    try:
+        # Fetch the webpage content
+        response = requests.get(url)
+        response.raise_for_status()
+
+        # Parse the HTML content
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Find the table (assuming it's the only table on the page)
+        table = soup.find("table")
+
+        # Extract the table data using Pandas' read_html with header option
+        df = pd.read_html(str(table), header=0 if header else None)[0]
+
+        return df
+
+    except Exception as e:
+        print(f"Error: Could not extract table data - {e}")
+        return None
+
+
+# # Example usage with header
+# url = "https://drugdesign.unistra.fr/LIT-PCBA/index.html"
+# df_with_header = extract_table_to_pandas(url, header=True)
+
+
+# df_with_header
+
+
+def aid_to_seq(aid):
+    """
+    Retrieves the protein sequence associated with a given assay ID (aid) from PubChem.
+
+    Args:
+      aid: The PubChem assay ID.
+
+    Returns:
+      The protein sequence as a string, or None if not found.
+    """
+    try:
+        # Construct the API request URL for the assay description
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/assay/aid/{aid}/description/JSON"
+
+        # Send the request and raise an exception for bad status codes
+        response = requests.get(url)
+        response.raise_for_status()
+
+        # Parse the JSON response
+        data = response.json()
+
+        # Extract the protein accession
+        protein_accession = data["PC_AssayContainer"][0]["assay"]["descr"]["target"][0][
+            "mol_id"
+        ]["protein_accession"]
+
+        # Set your email address for Entrez
+        Entrez.email = "your_email@example.com"
+
+        # Fetch the protein record from NCBI
+        handle = Entrez.efetch(
+            db="protein", id=protein_accession, rettype="gb", retmode="text"
+        )
+        record = SeqIO.read(handle, "genbank")
+        handle.close()
+
+        # Return the protein sequence
+        return str(record.seq)
+
+    except Exception as e:
+        print(f"Error: Could not retrieve sequence - {e}")
+        return None
+
+
+# # Example usage
+# aid = 2101
+# sequence = aid_to_seq(aid)
+
+# if sequence:
+#   print(f"Protein Sequence for aid {aid}:\n{sequence}")
 
 #### Main ####
 
@@ -255,6 +412,13 @@ LIT_base = "local data/LIT-PCBA/"
 LIT_dir = LIT_base + "PDBs/"
 info = {}
 folders = get_folder_names(LIT_dir)
+url = "https://drugdesign.unistra.fr/LIT-PCBA/index.html"
+LIT_site_df = extract_table_to_pandas(url, header=True)
+
+# esr gene are not written as ESR1 in the folder names - fix
+if LIT_site_df["Set"].str.contains("ESR").any():
+    # add the 1 to the ESR - ESR1
+    LIT_site_df["Set"] = LIT_site_df["Set"].str.replace("ESR", "ESR1")
 
 
 for sample in folders:
@@ -267,6 +431,12 @@ for sample in folders:
     info[sample]["pdbs"] = {}
     saved_uniprot_names = {}
 
+    result_string = LIT_site_df[LIT_site_df["Set"].str.contains(sample)]["AID"].values[
+        0
+    ]
+    print("Gene name: ", result_string)
+    info[sample]["Gene_seq"] = aid_to_seq(result_string)
+
     # find mol2 files that contain the word "protein"
     for file in sample_files:
         if "protein" in file:
@@ -278,18 +448,18 @@ for sample in folders:
             PDB_seq = get_sequence_with_mol2(sample_dir + file)
             info[sample]["pdbs"][pdb_id]["PDB_seq"] = PDB_seq
 
-            ### Fetching the sequence from Uniprot ###
-            uniprot_name = pdbh.fetch_PDB_uniprot_accession(pdb_id)[0]
-            # if uniprot_name has a value, then fetch the sequence
-            if uniprot_name:
-                # if the uniprot name is not in the saved_uniprot_names dictionary, then fetch the sequence
-                if uniprot_name not in saved_uniprot_names:
-                    sequence = pdbh.fetch_uniprot_sequence(uniprot_name)
-                else:
-                    sequence = saved_uniprot_names[uniprot_name]
-            else:
-                sequence = None
-            info[sample]["pdbs"][pdb_id]["uniprot_seq"] = sequence
+            # ### Fetching the sequence from Uniprot ###
+            # uniprot_name = pdbh.fetch_PDB_uniprot_accession(pdb_id)[0]
+            # # if uniprot_name has a value, then fetch the sequence
+            # if uniprot_name:
+            #     # if the uniprot name is not in the saved_uniprot_names dictionary, then fetch the sequence
+            #     if uniprot_name not in saved_uniprot_names:
+            #         sequence = pdbh.fetch_uniprot_sequence(uniprot_name)
+            #     else:
+            #         sequence = saved_uniprot_names[uniprot_name]
+            # else:
+            #     sequence = None
+            # info[sample]["pdbs"][pdb_id]["uniprot_seq"] = sequence
 
         if "ligand" in file:
             pdb_id = file[:4]
@@ -301,7 +471,10 @@ for sample in folders:
                 sample_dir + file
             )
 
-    info[sample]["decoys_smiles"] = get_inactive_file(sample_dir + "inactives.smi")
+    info[sample]["decoys_smiles"] = extract_smiles_from_ism(sample_dir + "actives.smi")
+    info[sample]["active_smiles"] = extract_smiles_from_ism(
+        sample_dir + "inactives.smi"
+    )
     print("finished with sample: ", sample)
 
 
